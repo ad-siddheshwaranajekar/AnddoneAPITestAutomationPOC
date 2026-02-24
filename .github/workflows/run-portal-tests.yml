@@ -1,0 +1,136 @@
+name: Run Portal Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      portal:
+        description: "Enter Portal Name (e.g., Admin)"
+        required: true
+        type: string
+
+      folder:
+        description: "Enter Folder Name (e.g., AdminUserFolder)"
+        required: true
+        type: string
+
+      environment:
+        description: "Select Environment"
+        required: true
+        type: choice
+        options:
+          - QAT
+          - UAT
+          - DEV
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - id: set-matrix
+        run: |
+          BASE="postman/${{ github.event.inputs.portal }}/${{ github.event.inputs.folder }}"
+
+          echo "Looking for collections inside $BASE"
+
+          if [ ! -d "$BASE" ]; then
+            echo "❌ Folder not found: $BASE"
+            exit 1
+          fi
+
+          FILES=$(find "$BASE" -maxdepth 1 -name "*.json" -type f | jq -R -s -c 'split("\n")[:-1]')
+
+          if [ "$FILES" = "[]" ]; then
+            echo "❌ No collections found in $BASE"
+            exit 1
+          fi
+
+          echo "Found collections:"
+          echo "$FILES"
+
+          echo "matrix={\"collection\":$FILES}" >> $GITHUB_OUTPUT
+
+  run-tests:
+    needs: discover
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install Newman + HTML Reporter
+        run: |
+          npm install -g newman
+          npm install -g newman-reporter-htmlextra
+
+      - name: Prepare Environment & Test Data
+        run: |
+          PORTAL="${{ github.event.inputs.portal }}"
+          ENVIRONMENT="${{ github.event.inputs.environment }}"
+
+          ENV_FILE="postman/$PORTAL/env/$ENVIRONMENT.env.json"
+
+          ENV_LOWER=$(echo "$ENVIRONMENT" | tr '[:upper:]' '[:lower:]')
+          DATA_FILE="postman/$PORTAL/testdata/$ENV_LOWER.csv"
+
+          echo "Using environment file: $ENV_FILE"
+
+          if [ ! -f "$ENV_FILE" ]; then
+            echo "❌ Environment file not found!"
+            exit 1
+          fi
+
+          echo "ENV_FILE=$ENV_FILE" >> $GITHUB_ENV
+
+          if [ -f "$DATA_FILE" ]; then
+            echo "Using test data file: $DATA_FILE"
+            echo "DATA_FILE=$DATA_FILE" >> $GITHUB_ENV
+          else
+            echo "No test data file found — running without iteration data"
+            echo "DATA_FILE=" >> $GITHUB_ENV
+          fi
+
+      - name: Run Collection
+        run: |
+          COLLECTION="${{ matrix.collection }}"
+          NAME=$(basename "$COLLECTION" .json)
+
+          echo "===================================="
+          echo "Running Collection: $COLLECTION"
+          echo "===================================="
+
+          if [ -n "$DATA_FILE" ]; then
+            newman run "$COLLECTION" \
+              --environment "$ENV_FILE" \
+              --iteration-data "$DATA_FILE" \
+              --reporters cli,htmlextra \
+              --reporter-htmlextra-export "$NAME-report.html"
+          else
+            newman run "$COLLECTION" \
+              --environment "$ENV_FILE" \
+              --reporters cli,htmlextra \
+              --reporter-htmlextra-export "$NAME-report.html"
+          fi
+
+      - name: Upload HTML Reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ github.event.inputs.portal }}-${{ github.event.inputs.folder }}-${{ github.event.inputs.environment }}
+          path: "*-report.html"
