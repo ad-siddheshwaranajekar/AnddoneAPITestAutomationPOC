@@ -18,15 +18,17 @@ on:
         type: string
 
       environment:
-        description: "Select Environment"
+        description: "Enter Environment Name (e.g., QAT1, QAT2, UAT, DEV)"
         required: true
-        type: choice
-        options:
-          - QAT
-          - UAT
-          - DEV
+        type: string
+
+      testdata:
+        description: "Optional: Enter TestData file name (without .csv)"
+        required: false
+        type: string
 
 jobs:
+
   discover:
     runs-on: ubuntu-latest
     outputs:
@@ -40,13 +42,12 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      # 🔥 Normalize Portal + Folder (Case-Insensitive)
+      # 🔹 Normalize Portal & Folder (Case-Insensitive)
       - id: normalize
         run: |
           INPUT_PORTAL="${{ github.event.inputs.portal }}"
           INPUT_FOLDER="${{ github.event.inputs.folder }}"
 
-          # Find portal (case-insensitive)
           PORTAL_PATH=$(find postman -maxdepth 1 -type d -iname "$INPUT_PORTAL" | head -n 1)
           if [ -z "$PORTAL_PATH" ]; then
             echo "❌ Portal not found!"
@@ -54,7 +55,6 @@ jobs:
           fi
           PORTAL_NAME=$(basename "$PORTAL_PATH")
 
-          # Find folder inside portal (case-insensitive)
           FOLDER_PATH=$(find "$PORTAL_PATH" -maxdepth 1 -type d -iname "$INPUT_FOLDER" | head -n 1)
           if [ -z "$FOLDER_PATH" ]; then
             echo "❌ Folder not found inside portal!"
@@ -65,7 +65,7 @@ jobs:
           echo "portal_actual=$PORTAL_NAME" >> $GITHUB_OUTPUT
           echo "folder_actual=$FOLDER_NAME" >> $GITHUB_OUTPUT
 
-      # 🔥 Build matrix of all collections inside folder
+      # 🔹 Create Matrix of Collections
       - id: set-matrix
         run: |
           BASE="postman/${{ steps.normalize.outputs.portal_actual }}/${{ steps.normalize.outputs.folder_actual }}"
@@ -78,6 +78,7 @@ jobs:
           fi
 
           echo "matrix={\"collection\":$FILES}" >> $GITHUB_OUTPUT
+
 
   run-tests:
     needs: discover
@@ -100,34 +101,44 @@ jobs:
           npm install -g newman
           npm install -g newman-reporter-htmlextra
 
-      # 🔥 Resolve Environment File (Supports Postman Naming)
+      # 🔹 Resolve Environment & Optional TestData
       - name: Resolve Environment & Test Data
         run: |
           PORTAL="${{ needs.discover.outputs.portal_actual }}"
-          ENVIRONMENT="${{ github.event.inputs.environment }}"
+          ENVIRONMENT_INPUT="${{ github.event.inputs.environment }}"
+          TESTDATA_INPUT="${{ github.event.inputs.testdata }}"
 
-          # Find env file like: QAT.postman_environment.json
+          # Find environment file (supports multiple QATs)
           ENV_FILE=$(find postman/$PORTAL/env \
-            -iname "$ENVIRONMENT.postman_environment.json" | head -n 1)
+            -iname "$ENVIRONMENT_INPUT.postman_environment.json" | head -n 1)
 
           if [ -z "$ENV_FILE" ]; then
             echo "❌ Environment file not found!"
+            echo "Available environments:"
+            ls postman/$PORTAL/env
             exit 1
           fi
 
-          # Auto map testdata (qat.csv, uat.csv, dev.csv)
-          ENV_LOWER=$(echo "$ENVIRONMENT" | tr '[:upper:]' '[:lower:]')
-          DATA_FILE="postman/$PORTAL/testdata/$ENV_LOWER.csv"
-
           echo "ENV_FILE=$ENV_FILE" >> $GITHUB_ENV
 
-          if [ -f "$DATA_FILE" ]; then
+          # Optional testdata
+          if [ -n "$TESTDATA_INPUT" ]; then
+            DATA_FILE=$(find postman/$PORTAL/testdata \
+              -iname "$TESTDATA_INPUT.csv" | head -n 1)
+
+            if [ -z "$DATA_FILE" ]; then
+              echo "❌ TestData file not found!"
+              echo "Available testdata files:"
+              ls postman/$PORTAL/testdata
+              exit 1
+            fi
+
             echo "DATA_FILE=$DATA_FILE" >> $GITHUB_ENV
           else
             echo "DATA_FILE=" >> $GITHUB_ENV
           fi
 
-      # 🔥 Run Collection
+      # 🔹 Run Collection
       - name: Run Collection
         run: |
           COLLECTION="${{ matrix.collection }}"
@@ -148,7 +159,7 @@ jobs:
               --reporter-htmlextra-export "$NAME-report.html"
           fi
 
-      # 🔥 Upload Reports
+      # 🔹 Upload Reports
       - name: Upload Reports
         uses: actions/upload-artifact@v4
         with:
