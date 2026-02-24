@@ -1,0 +1,307 @@
+{
+  "info": {
+    "_postman_id": "3842acb2-660f-47ed-bf89-5b1584463939",
+    "name": "merchant login",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "11951345"
+  },
+  "item": [
+    {
+      "name": "merchant Login",
+      "item": [
+        {
+          "name": "Login to system",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "// ===============================",
+                  "// 0. GET EXPECTED STATUS (Smart Fallback)",
+                  "// ===============================",
+                  "",
+                  "// Priority:",
+                  "// 1️⃣ JSON data file",
+                  "// 2️⃣ Environment variable",
+                  "// 3️⃣ Default = 200",
+                  "",
+                  "let expectedStatus =",
+                  "    pm.iterationData.get(\"expectedStatus\") ||",
+                  "    pm.environment.get(\"expectedStatus\") ||",
+                  "    200;",
+                  "",
+                  "expectedStatus = parseInt(expectedStatus);",
+                  "",
+                  "if (isNaN(expectedStatus)) {",
+                  "    throw new Error(\"Invalid expectedStatus value\");",
+                  "}",
+                  "",
+                  "console.log(\"Expected Status:\", expectedStatus);",
+                  "",
+                  "",
+                  "// ===============================",
+                  "// 1. PARSE RESPONSE SAFELY",
+                  "// ===============================",
+                  "let jsonData;",
+                  "",
+                  "try {",
+                  "    jsonData = pm.response.json();",
+                  "} catch (e) {",
+                  "    throw new Error(\"Response is not valid JSON\");",
+                  "}",
+                  "",
+                  "",
+                  "// ===============================",
+                  "// 2. STATUS CODE VALIDATION",
+                  "// ===============================",
+                  "pm.test(\"Status code validation\", function () {",
+                  "    pm.response.to.have.status(expectedStatus);",
+                  "});",
+                  "",
+                  "",
+                  "// ===============================",
+                  "// 3. SUCCESS CASE (200)",
+                  "// ===============================",
+                  "if (expectedStatus === 200) {",
+                  "",
+                  "    // ---- Required Fields ----",
+                  "    pm.test(\"Response contains required fields\", function () {",
+                  "        const requiredFields = [",
+                  "            \"token\",\"refreshToken\",\"changePassword\",\"userType\",",
+                  "            \"parentId\",\"resellerId\",\"merchantId\",",
+                  "            \"timeZone\",\"loginTime\",\"country\",",
+                  "            \"resellerLevel\",\"changedPasswordOn\",\"isAdminRole\"",
+                  "        ];",
+                  "",
+                  "        requiredFields.forEach(field => {",
+                  "            pm.expect(jsonData).to.have.property(field);",
+                  "        });",
+                  "    });",
+                  "",
+                  "    // ---- Token Validation ----",
+                  "    pm.test(\"Token is non-empty string\", function () {",
+                  "        pm.expect(jsonData.token).to.be.a(\"string\").and.not.empty;",
+                  "    });",
+                  "",
+                  "  ",
+                  "",
+                  "",
+                  "  ",
+                  "",
+                  "  ",
+                  "",
+                  "    // ---- Store Environment Variables ----",
+                  "    pm.environment.set(\"token\", jsonData.token);",
+                  "    pm.environment.set(\"refresh_Token\", jsonData.refreshToken);",
+                  "    pm.environment.set(\"env_Parentid\", jsonData.parentId);",
+                  "    pm.environment.set(\"env_Resellerid\", jsonData.resellerId);",
+                  "    pm.environment.set(\"env_merchantId\", jsonData.merchantId);",
+                  "",
+                  "    pm.test(\"Environment variables set correctly\", function () {",
+                  "        pm.expect(pm.environment.get(\"token\")).to.eql(jsonData.token);",
+                  "    });",
+                  "",
+                  "}",
+                  "",
+                  "",
+                  "// ===============================",
+                  "// 4. FAILURE CASE (400)",
+                  "// ===============================",
+                  "if (expectedStatus === 400) {",
+                  "",
+                  "    pm.test(\"Error message validation\", function () {",
+                  "        pm.expect(jsonData).to.have.property(\"message\");",
+                  "        pm.expect(jsonData.message).to.eql(\"Key_CheckYourCredentials\");",
+                  "    });",
+                  "",
+                  "    pm.test(\"Errors array validation\", function () {",
+                  "        pm.expect(jsonData.errors).to.be.an(\"array\");",
+                  "    });",
+                  "",
+                  "}",
+                  "",
+                  "",
+                  "// ===============================",
+                  "// 5. RESPONSE TIME CHECK",
+                  "// ===============================",
+                  "pm.test(\"Response time is less than 3000ms\", function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});",
+                  ""
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// // Get merchantTag from iteration data (CSV)\r",
+                  "// let merchantTag = pm.iterationData.get(\"merchantTag_paymentLink\");\r",
+                  "// console.log(merchantTag);\r",
+                  "// merchantTag = \"merchantUser001\";\r",
+                  "\r",
+                  "// // Capture xVersion from iteration data (testData.csv)\r",
+                  "// let xVersion = pm.iterationData.get(\"xVersion\");\r",
+                  "// pm.environment.set(\"xVersion\", xVersion);\r",
+                  "// console.log('xVersion: ' + xVersion);\r",
+                  "\r",
+                  "// // Capture expectedStatusCode from iteration data (testData.csv)\r",
+                  "// let expectedStatusCode = pm.iterationData.get(\"expectedStatusCode\");\r",
+                  "// pm.environment.set(\"expectedStatusCode\", expectedStatusCode);\r",
+                  "// console.log('expectedStatusCode: ' + expectedStatusCode);\r",
+                  "\r",
+                  "// // Load merchantLoginData from environment variable with error handling\r",
+                  "// let merchantLoginData;\r",
+                  "// const merchantLoginDataRaw = pm.environment.get(\"merchantLoginData\");\r",
+                  "// console.log('MerchantLoginData:'+merchantLoginDataRaw);\r",
+                  "// if (!merchantLoginDataRaw) {\r",
+                  "//     throw new Error(\"Environment variable 'merchantLoginData' is not set or is empty\");\r",
+                  "// }\r",
+                  "\r",
+                  "// try {\r",
+                  "//     merchantLoginData = JSON.parse(merchantLoginDataRaw);\r",
+                  "// } catch (e) {\r",
+                  "//     console.error(\"Failed to parse merchantLoginData. Raw value:\", merchantLoginDataRaw);\r",
+                  "//     throw new Error(\"Invalid JSON in 'merchantLoginData' environment variable: \" + e.message);\r",
+                  "// }\r",
+                  "\r",
+                  "// // Find matching merchant by merchantTag\r",
+                  "// const selectedMerchant = merchantLoginData.find(m => m.merchantTag === merchantTag);\r",
+                  "\r",
+                  "// if (!selectedMerchant) {\r",
+                  "//     console.error(\"Available merchantTags:\", merchantLoginData.map(m => m.merchantTag));\r",
+                  "//     throw new Error(\"No merchant found for merchantTag: \" + merchantTag);\r",
+                  "// }\r",
+                  "\r",
+                  "// // Set runtime variables for username and password\r",
+                  "// pm.variables.set(\"username\", selectedMerchant.username);\r",
+                  "// pm.variables.set(\"password\", selectedMerchant.password);\r",
+                  "\r",
+                  "// console.log('merchantTag: ' + merchantTag);\r",
+                  "// console.log('username: ' + selectedMerchant.username);\r",
+                  "// console.log('password: ' + selectedMerchant.password);\r",
+                  "\r",
+                  "pm.variables.set(\"userName\", pm.iterationData.get(\"userName\"));\r",
+                  "pm.variables.set(\"password\", pm.iterationData.get(\"password\"));"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{BaseURL}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "// {\r\n//     \"userName\": \"{{username}}\",\r\n//     \"password\": \"{{password}}\"\r\n// }\r\n\r\n{\r\n    \"userName\": \"AutomationTest001\",\r\n    \"password\": \"AutomationTest@12345\"\r\n}\r\n\r\n// {\r\n//   \"userName\": \"{{userName}}\",\r\n//   \"password\": \"{{password}}\"\r\n// }\r\n\r\n// {\r\n//     \"userName\": \"AtharvBalance\",\r\n//     \"password\": \"AdminDev#052026\"\r\n// }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BaseURL}}/users/sessions",
+              "host": [
+                "{{BaseURL}}"
+              ],
+              "path": [
+                "users",
+                "sessions"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get merchant details",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "let jsonData = pm.response.json();",
+                  "",
+                  "// Store values in environment variables",
+                  "pm.environment.set(\"env_merchantAccessKey\", jsonData.accessKey);",
+                  "pm.environment.set(\"env_publicKey\", jsonData.paymentToken);",
+                  "",
+                  "// Validate status code",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "// Validate paymentToken exists and is not empty",
+                  "pm.test(\"paymentToken is present and not empty\", function () {",
+                  "    pm.expect(jsonData.paymentToken).to.exist;",
+                  "    pm.expect(jsonData.paymentToken).to.be.a('string');",
+                  "    pm.expect(jsonData.paymentToken).to.not.be.empty;",
+                  "});",
+                  "",
+                  "// Validate accessKey exists and is not empty",
+                  "pm.test(\"accessKey is present and not empty\", function () {",
+                  "    pm.expect(jsonData.accessKey).to.exist;",
+                  "    pm.expect(jsonData.accessKey).to.be.a('string');",
+                  "    pm.expect(jsonData.accessKey).to.not.be.empty;",
+                  "});"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{BaseURL}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{BaseURL}}/merchants/{{env_merchantId}}",
+              "host": [
+                "{{BaseURL}}"
+              ],
+              "path": [
+                "merchants",
+                "{{env_merchantId}}"
+              ],
+              "query": [
+                {
+                  "key": "merchantId",
+                  "value": "6Mxamnx3",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,152 @@
+{
+  "info": {
+    "_postman_id": "ab1bdaed-720a-44bc-85dc-b1882c683eff",
+    "name": "Ally login",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "11951345"
+  },
+  "item": [
+    {
+      "name": "Ally Login",
+      "item": [
+        {
+          "name": "STC_001: Verify the Admin can login Copy",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "let jsonData = pm.response.json();\r",
+                  "\r",
+                  "// ✅ TC01 - Validate status code is 200\r",
+                  "pm.test(\"TC01 - Validate status code is 200\", function () {\r",
+                  "    pm.response.to.have.status(200);\r",
+                  "});\r",
+                  "\r",
+                  "// ✅ TC02 - Validate token is present and save to environment\r",
+                  "pm.test(\"TC02 - Validate token is present and save to environment\", function () {\r",
+                  "    pm.expect(jsonData).to.have.property(\"token\");\r",
+                  "    pm.expect(jsonData.token).to.be.a(\"string\").that.is.not.empty;\r",
+                  "    pm.environment.set(\"token\", jsonData.token);\r",
+                  "});\r",
+                  "\r",
+                  "// ✅ TC03 - Validate refreshToken is present and save to environment\r",
+                  "pm.test(\"TC03 - Validate refreshToken is present and save to environment\", function () {\r",
+                  "    pm.expect(jsonData).to.have.property(\"refreshToken\");\r",
+                  "    pm.expect(jsonData.refreshToken).to.be.a(\"string\").that.is.not.empty;\r",
+                  "    pm.environment.set(\"refresh_Token\", jsonData.refreshToken);\r",
+                  "});\r",
+                  "\r",
+                  "// ✅ TC04 - Validate parentId is present and save to environment\r",
+                  "pm.test(\"TC04 - Validate parentId is present and save to environment\", function () {\r",
+                  "    pm.expect(jsonData).to.have.property(\"parentId\");\r",
+                  "    pm.expect(jsonData.parentId).to.be.a(\"string\").that.is.not.empty;\r",
+                  "    pm.environment.set(\"env_Parentid\", jsonData.parentId);\r",
+                  "});\r",
+                  "\r",
+                  "// ✅ TC05 - Validate resellerId is present and save to environment\r",
+                  "pm.test(\"TC05 - Validate resellerId is present and save to environment\", function () {\r",
+                  "    pm.expect(jsonData).to.have.property(\"resellerId\");\r",
+                  "    pm.expect(jsonData.resellerId).to.be.a(\"string\").that.is.not.empty;\r",
+                  "    pm.environment.set(\"env_Resellerid\", jsonData.resellerId);\r",
+                  "});\r",
+                  "\r",
+                  "// // ✅ TC06 - Validate merchantId is present and save to environment\r",
+                  "// pm.test(\"TC06 - Validate merchantId is present and save to environment\", function () {\r",
+                  "//     pm.expect(jsonData).to.have.property(\"merchantId\");\r",
+                  "//     pm.expect(jsonData.merchantId).to.be.a(\"string\").that.is.not.empty;\r",
+                  "//     pm.environment.set(\"env_merchantId\", jsonData.merchantId);\r",
+                  "// });\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "\r",
+                  "//OLD//\r",
+                  "\r",
+                  "\r",
+                  "// let jsonData = pm.response.json();\r",
+                  "// pm.test(\"Status code is 200\", function () {\r",
+                  "//     pm.response.to.have.status(200);\r",
+                  "// });\r",
+                  "// pm.environment.set(\"token\", jsonData.token);\r",
+                  "// pm.environment.set(\"refresh_Token\", jsonData.refreshToken);\r",
+                  "// pm.environment.set(\"env_Parentid\", jsonData.parentId);\r",
+                  "// pm.environment.set(\"env_Resellerid\", jsonData.resellerId);\r",
+                  "// pm.environment.set(\"env_merchantId\", jsonData.merchantId);"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  ""
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{BaseURL}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": " //Dev\r\n// {\r\n//       \"userName\": \"AdminUser\",\r\n//       \"password\": \"AdminDev#242024\"\r\n//  }\r\n\r\n\r\n\r\n//QAT\r\n{\r\n\"userName\": \"SiddheshwarQAT\",\r\n\"password\": \"666#Qwertyuiop\"\r\n}\r\n\r\n// // //UAT\r\n\r\n// {\r\n// \"userName\": \"SiddheshwarUAT\",\r\n// \"password\": \"123#Qwertyuiop\"\r\n// }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BaseURL}}/users/sessions",
+              "host": [
+                "{{BaseURL}}"
+              ],
+              "path": [
+                "users",
+                "sessions"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
