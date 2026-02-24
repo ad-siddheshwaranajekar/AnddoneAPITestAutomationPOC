@@ -4,12 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       portal:
-        description: "Enter Portal Name (e.g., Admin)"
+        description: "Select Portal"
         required: true
-        type: string
+        type: choice
+        options:
+          - Admin
+          - Merchant
+          - Ally
 
       folder:
-        description: "Enter Folder Name inside Portal (e.g., User)"
+        description: "Enter Folder Name inside Portal"
         required: true
         type: string
 
@@ -28,46 +32,48 @@ jobs:
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       portal_actual: ${{ steps.normalize.outputs.portal_actual }}
+      folder_actual: ${{ steps.normalize.outputs.folder_actual }}
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install jq
-        run: sudo apt-get install -y jq
+        run: sudo apt-get update && sudo apt-get install -y jq
 
-      # 🔥 Normalize Portal + Folder (Case Insensitive)
+      # 🔥 Normalize Portal + Folder (Case-Insensitive)
       - id: normalize
         run: |
           INPUT_PORTAL="${{ github.event.inputs.portal }}"
           INPUT_FOLDER="${{ github.event.inputs.folder }}"
 
-          PORTAL=$(find postman -maxdepth 1 -type d -iname "$INPUT_PORTAL" | head -n 1)
-          if [ -z "$PORTAL" ]; then
+          # Find portal (case-insensitive)
+          PORTAL_PATH=$(find postman -maxdepth 1 -type d -iname "$INPUT_PORTAL" | head -n 1)
+          if [ -z "$PORTAL_PATH" ]; then
             echo "❌ Portal not found!"
             exit 1
           fi
+          PORTAL_NAME=$(basename "$PORTAL_PATH")
 
-          PORTAL_NAME=$(basename "$PORTAL")
-
-          FOLDER=$(find "$PORTAL" -maxdepth 1 -type d -iname "$INPUT_FOLDER" | head -n 1)
-          if [ -z "$FOLDER" ]; then
+          # Find folder inside portal (case-insensitive)
+          FOLDER_PATH=$(find "$PORTAL_PATH" -maxdepth 1 -type d -iname "$INPUT_FOLDER" | head -n 1)
+          if [ -z "$FOLDER_PATH" ]; then
             echo "❌ Folder not found inside portal!"
             exit 1
           fi
-
-          FOLDER_NAME=$(basename "$FOLDER")
+          FOLDER_NAME=$(basename "$FOLDER_PATH")
 
           echo "portal_actual=$PORTAL_NAME" >> $GITHUB_OUTPUT
-          echo "folder_actual=$FOLDER_NAME" >> $GITHUB_ENV
+          echo "folder_actual=$FOLDER_NAME" >> $GITHUB_OUTPUT
 
+      # 🔥 Build matrix of all collections inside folder
       - id: set-matrix
         run: |
-          BASE="postman/${{ steps.normalize.outputs.portal_actual }}/${{ env.folder_actual }}"
+          BASE="postman/${{ steps.normalize.outputs.portal_actual }}/${{ steps.normalize.outputs.folder_actual }}"
 
           FILES=$(find "$BASE" -maxdepth 1 -name "*.json" -type f | jq -R -s -c 'split("\n")[:-1]')
 
           if [ "$FILES" = "[]" ]; then
-            echo "❌ No collections found!"
+            echo "❌ No collections found in folder!"
             exit 1
           fi
 
@@ -94,20 +100,24 @@ jobs:
           npm install -g newman
           npm install -g newman-reporter-htmlextra
 
-      - name: Prepare Environment
+      # 🔥 Resolve Environment File (Supports Postman Naming)
+      - name: Resolve Environment & Test Data
         run: |
           PORTAL="${{ needs.discover.outputs.portal_actual }}"
           ENVIRONMENT="${{ github.event.inputs.environment }}"
 
-          ENV_FILE="postman/$PORTAL/env/$ENVIRONMENT.env.json"
+          # Find env file like: QAT.postman_environment.json
+          ENV_FILE=$(find postman/$PORTAL/env \
+            -iname "$ENVIRONMENT.postman_environment.json" | head -n 1)
 
-          ENV_LOWER=$(echo "$ENVIRONMENT" | tr '[:upper:]' '[:lower:]')
-          DATA_FILE="postman/$PORTAL/testdata/$ENV_LOWER.csv"
-
-          if [ ! -f "$ENV_FILE" ]; then
+          if [ -z "$ENV_FILE" ]; then
             echo "❌ Environment file not found!"
             exit 1
           fi
+
+          # Auto map testdata (qat.csv, uat.csv, dev.csv)
+          ENV_LOWER=$(echo "$ENVIRONMENT" | tr '[:upper:]' '[:lower:]')
+          DATA_FILE="postman/$PORTAL/testdata/$ENV_LOWER.csv"
 
           echo "ENV_FILE=$ENV_FILE" >> $GITHUB_ENV
 
@@ -117,10 +127,13 @@ jobs:
             echo "DATA_FILE=" >> $GITHUB_ENV
           fi
 
+      # 🔥 Run Collection
       - name: Run Collection
         run: |
           COLLECTION="${{ matrix.collection }}"
           NAME=$(basename "$COLLECTION" .json)
+
+          echo "🚀 Running $NAME"
 
           if [ -n "$DATA_FILE" ]; then
             newman run "$COLLECTION" \
@@ -135,8 +148,9 @@ jobs:
               --reporter-htmlextra-export "$NAME-report.html"
           fi
 
+      # 🔥 Upload Reports
       - name: Upload Reports
         uses: actions/upload-artifact@v4
         with:
-          name: reports-${{ github.event.inputs.portal }}-${{ github.event.inputs.folder }}-${{ github.event.inputs.environment }}
+          name: reports-${{ needs.discover.outputs.portal_actual }}-${{ needs.discover.outputs.folder_actual }}-${{ github.event.inputs.environment }}
           path: "*-report.html"
