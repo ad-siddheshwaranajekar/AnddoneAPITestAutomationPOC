@@ -64,11 +64,11 @@ jobs:
           echo "portal_actual=$PORTAL_NAME" >> $GITHUB_OUTPUT
           echo "folder_actual=$FOLDER_NAME" >> $GITHUB_OUTPUT
 
-      # Create matrix of collections
+      # Create matrix of collections (recursive)
       - id: set-matrix
         run: |
           BASE="postman/${{ steps.normalize.outputs.portal_actual }}/${{ steps.normalize.outputs.folder_actual }}"
-          FILES=$(find "$BASE" -maxdepth 1 -name "*.json" -type f | jq -R -s -c 'split("\n")[:-1]')
+          FILES=$(find "$BASE" -type f -name "*.json" | jq -R -s -c 'split("\n")[:-1]')
 
           if [ "$FILES" = "[]" ]; then
             echo "❌ No collections found in folder!"
@@ -150,20 +150,39 @@ jobs:
 
           set +e  # continue even if some tests fail
 
-          if [ -n "$DATA_FILE" ]; then
-            newman run "$COLLECTION" \
-              --environment "$ENV_FILE" \
-              --iteration-data "$DATA_FILE" \
-              --reporters cli,htmlextra \
-              --reporter-htmlextra-export "$NAME-report.html"
+          # Multi-version support (optional)
+          if [[ "$NAME" == "AdminLogin"* ]]; then
+            X_VERSIONS=("2.0" "2.1" "2.2" "2.3" "3.0")
           else
-            newman run "$COLLECTION" \
-              --environment "$ENV_FILE" \
-              --reporters cli,htmlextra \
-              --reporter-htmlextra-export "$NAME-report.html"
+            X_VERSIONS=("")
           fi
 
-          echo "✅ Finished $NAME (check HTML report for test failures)"
+          for VERSION in "${X_VERSIONS[@]}"; do
+            REPORT_NAME="$NAME"
+            if [ -n "$VERSION" ]; then
+              REPORT_NAME="$NAME-v$VERSION"
+              ENV_ARGS="--env-var x_version=$VERSION"
+            else
+              ENV_ARGS=""
+            fi
+
+            if [ -n "$DATA_FILE" ]; then
+              newman run "$COLLECTION" \
+                --environment "$ENV_FILE" \
+                $ENV_ARGS \
+                --iteration-data "$DATA_FILE" \
+                --reporters cli,htmlextra \
+                --reporter-htmlextra-export "$REPORT_NAME-report.html"
+            else
+              newman run "$COLLECTION" \
+                --environment "$ENV_FILE" \
+                $ENV_ARGS \
+                --reporters cli,htmlextra \
+                --reporter-htmlextra-export "$REPORT_NAME-report.html"
+            fi
+          done
+
+          echo "✅ Finished $NAME (check HTML reports for test failures)"
 
       # Upload reports always
       - name: Upload Reports
