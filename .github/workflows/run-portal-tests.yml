@@ -68,7 +68,9 @@ jobs:
       - id: set-matrix
         run: |
           BASE="postman/${{ steps.normalize.outputs.portal_actual }}/${{ steps.normalize.outputs.folder_actual }}"
-          FILES=$(find "$BASE" -type f -name "*.json" | jq -R -s -c 'split("\n")[:-1]')
+
+          # Recursively find all JSON collections including subfolders and get absolute paths
+          FILES=$(find "$BASE" -type f -name "*.json" -print0 | xargs -0 -n1 realpath | jq -R -s -c 'split("\n")[:-1]')
 
           if [ "$FILES" = "[]" ]; then
             echo "❌ No collections found in folder or subfolders!"
