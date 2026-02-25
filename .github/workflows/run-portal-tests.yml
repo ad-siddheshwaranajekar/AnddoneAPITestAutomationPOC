@@ -13,12 +13,12 @@ on:
           - Ally
 
       folder:
-        description: "Enter Folder Name inside Portal"
+        description: "Enter Folder Name inside Portal (Example: Login)"
         required: true
         type: string
 
       environment:
-        description: "Enter Environment Name (e.g., QAT, QAT1, UAT, DEV)"
+        description: "Enter Environment Name (Example: QAT, UAT, DEV)"
         required: true
         type: string
 
@@ -32,8 +32,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
-      portal_actual: ${{ steps.normalize.outputs.portal_actual }}
-      folder_actual: ${{ steps.normalize.outputs.folder_actual }}
+      portal_actual: ${{ steps.portal.outputs.portal_actual }}
+      folder_actual: ${{ steps.folder.outputs.folder_actual }}
 
     steps:
       - uses: actions/checkout@v4
@@ -41,47 +41,71 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      # Normalize Portal & Folder (case-insensitive)
-      - id: normalize
+      # Normalize Portal (case insensitive)
+      - id: portal
         run: |
           INPUT_PORTAL="${{ github.event.inputs.portal }}"
-          INPUT_FOLDER="${{ github.event.inputs.folder }}"
-
           PORTAL_PATH=$(find postman -maxdepth 1 -type d -iname "$INPUT_PORTAL" | head -n 1)
+
           if [ -z "$PORTAL_PATH" ]; then
             echo "❌ Portal not found!"
             exit 1
           fi
-          PORTAL_NAME=$(basename "$PORTAL_PATH")
 
-          FOLDER_PATH=$(find "$PORTAL_PATH" -maxdepth 1 -type d -iname "$INPUT_FOLDER" | head -n 1)
-          if [ -z "$FOLDER_PATH" ]; then
-            echo "❌ Folder not found inside portal!"
+          PORTAL_NAME=$(basename "$PORTAL_PATH")
+          echo "portal_actual=$PORTAL_NAME" >> $GITHUB_OUTPUT
+
+      # Strict Folder Logic: postman/<Portal>/<Folder>
+      - id: folder
+        run: |
+          PORTAL="${{ steps.portal.outputs.portal_actual }}"
+          INPUT_FOLDER="${{ github.event.inputs.folder }}"
+
+          TARGET_FOLDER="postman/$PORTAL/$INPUT_FOLDER"
+
+          if [ ! -d "$TARGET_FOLDER" ]; then
+            echo "❌ Folder not found: $TARGET_FOLDER"
             exit 1
           fi
-          FOLDER_NAME=$(basename "$FOLDER_PATH")
 
-          echo "portal_actual=$PORTAL_NAME" >> $GITHUB_OUTPUT
-          echo "folder_actual=$FOLDER_NAME" >> $GITHUB_OUTPUT
+          echo "folder_actual=$INPUT_FOLDER" >> $GITHUB_OUTPUT
 
-      # Create matrix of collections (recursive, includes subfolders)
+      # 🔥 Recursive Collection Detection (Unlimited Depth)
       - id: set-matrix
         run: |
-          BASE="postman/${{ steps.normalize.outputs.portal_actual }}/${{ steps.normalize.outputs.folder_actual }}"
+          PORTAL="${{ steps.portal.outputs.portal_actual }}"
+          FOLDER="${{ steps.folder.outputs.folder_actual }}"
 
-          # Recursively find all JSON collections including subfolders and get absolute paths
-          FILES=$(find "$BASE" -type f -name "*.json" -print0 | xargs -0 -n1 realpath | jq -R -s -c 'split("\n")[:-1]')
+          BASE_PATH="postman/$PORTAL/$FOLDER"
+
+          echo "Scanning collections inside: $BASE_PATH"
+
+          # Only pick Postman collections (recommended naming)
+          FILES=$(find "$BASE_PATH" -type f -name "*.postman_collection.json" -print0 \
+            | xargs -0 -n1 realpath \
+            | jq -R -s -c 'split("\n")[:-1]')
+
+          # If no *.postman_collection.json found, fallback to *.json
+          if [ "$FILES" = "[]" ]; then
+            FILES=$(find "$BASE_PATH" -type f -name "*.json" -print0 \
+              | xargs -0 -n1 realpath \
+              | jq -R -s -c 'split("\n")[:-1]')
+          fi
 
           if [ "$FILES" = "[]" ]; then
-            echo "❌ No collections found in folder or subfolders!"
+            echo "❌ No collections found inside folder or subfolders!"
             exit 1
           fi
+
+          echo "Collections found:"
+          echo "$FILES"
 
           echo "matrix={\"collection\":$FILES}" >> $GITHUB_OUTPUT
 
   run-tests:
     needs: discover
     runs-on: ubuntu-latest
+
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
@@ -99,58 +123,56 @@ jobs:
           npm install -g newman
           npm install -g newman-reporter-htmlextra
 
-      # Resolve Environment & Optional Test Data
-      - name: Resolve Environment & Test Data
+      # Resolve Environment & Optional TestData
+      - name: Resolve Environment & TestData
         run: |
           PORTAL="${{ needs.discover.outputs.portal_actual }}"
-          ENVIRONMENT_INPUT="${{ github.event.inputs.environment }}"
+          ENV_INPUT="${{ github.event.inputs.environment }}"
           TESTDATA_INPUT="${{ github.event.inputs.testdata }}"
 
-          echo "Portal: $PORTAL"
-          echo "Environment Input: $ENVIRONMENT_INPUT"
-
           ENV_DIR="postman/$PORTAL/env"
+
           if [ ! -d "$ENV_DIR" ]; then
-            echo "❌ Environment directory not found: $ENV_DIR"
+            echo "❌ Environment directory not found!"
             exit 1
           fi
 
-          # Case-insensitive partial match for environment
-          ENV_FILE=$(find "$ENV_DIR" -type f -iname "*$ENVIRONMENT_INPUT*.postman_environment.json" | head -n 1)
+          ENV_FILE=$(find "$ENV_DIR" -type f -iname "*$ENV_INPUT*.postman_environment.json" | head -n 1)
+
           if [ -z "$ENV_FILE" ]; then
             echo "❌ Environment file not found!"
-            echo "Available files in $ENV_DIR:"
+            echo "Available files:"
             ls "$ENV_DIR"
             exit 1
           fi
-          echo "Using environment file: $ENV_FILE"
+
           echo "ENV_FILE=$PWD/$ENV_FILE" >> $GITHUB_ENV
 
           # Optional testdata
           if [ -n "$TESTDATA_INPUT" ]; then
             DATA_FILE=$(find postman/$PORTAL/testdata -type f -iname "*$TESTDATA_INPUT*.csv" | head -n 1)
+
             if [ -z "$DATA_FILE" ]; then
               echo "❌ TestData file not found!"
-              echo "Available testdata files in postman/$PORTAL/testdata:"
-              ls postman/$PORTAL/testdata
               exit 1
             fi
+
             echo "DATA_FILE=$PWD/$DATA_FILE" >> $GITHUB_ENV
           else
             echo "DATA_FILE=" >> $GITHUB_ENV
           fi
 
-      # Run Collection (continue even if some tests fail)
+      # Run Each Collection (Parallel via Matrix)
       - name: Run Collection
         run: |
           COLLECTION="${{ matrix.collection }}"
           NAME=$(basename "$COLLECTION" .json)
 
-          echo "🚀 Running $NAME"
+          echo "🚀 Running: $NAME"
           echo "Using ENV_FILE=$ENV_FILE"
           echo "Using DATA_FILE=$DATA_FILE"
 
-          set +e  # continue even if some tests fail
+          set +e
 
           if [ -n "$DATA_FILE" ]; then
             newman run "$COLLECTION" \
@@ -165,9 +187,9 @@ jobs:
               --reporter-htmlextra-export "$NAME-report.html"
           fi
 
-          echo "✅ Finished $NAME (check HTML reports for test failures)"
+          echo "Finished: $NAME"
 
-      # Upload reports always
+      # Upload All Reports
       - name: Upload Reports
         if: always()
         uses: actions/upload-artifact@v4
