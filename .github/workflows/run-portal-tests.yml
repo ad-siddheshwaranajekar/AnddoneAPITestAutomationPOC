@@ -42,17 +42,19 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      # 🔍 Normalize Portal & Folder (RECURSIVE SEARCH)
+      # 🔍 Normalize Portal & Folder (ROOT LEVEL)
       - id: normalize
         run: |
           INPUT_PORTAL="${{ github.event.inputs.portal }}"
           INPUT_FOLDER="${{ github.event.inputs.folder }}"
 
-          echo "Searching for Portal: $INPUT_PORTAL"
-          PORTAL_PATH=$(find postman -type d -iname "$INPUT_PORTAL" | head -n 1)
+          echo "Searching for Portal in repo root: $INPUT_PORTAL"
+          PORTAL_PATH=$(find . -maxdepth 1 -type d -iname "$INPUT_PORTAL" | head -n 1)
 
           if [ -z "$PORTAL_PATH" ]; then
-            echo "❌ Portal not found!"
+            echo "❌ Portal not found at root level!"
+            echo "Available portals:"
+            find . -maxdepth 1 -type d
             exit 1
           fi
 
@@ -128,14 +130,14 @@ jobs:
           echo "Portal: $PORTAL"
           echo "Environment Input: $ENVIRONMENT_INPUT"
 
-          ENV_DIR="postman/$PORTAL/environment"
+          ENV_DIR="$PORTAL/environment"
 
           if [ ! -d "$ENV_DIR" ]; then
             echo "❌ Environment directory not found: $ENV_DIR"
             exit 1
           fi
 
-          ENV_FILE=$(find "$ENV_DIR" -type f -iname "*$ENVIRONMENT_INPUT*" | head -n 1)
+          ENV_FILE=$(find "$ENV_DIR" -type f -iname "*$ENVIRONMENT_INPUT*.postman_environment.json" | head -n 1)
 
           if [ -z "$ENV_FILE" ]; then
             echo "❌ Environment file not found for input: $ENVIRONMENT_INPUT"
@@ -147,14 +149,21 @@ jobs:
           echo "Using environment file: $ENV_FILE"
           echo "ENV_FILE=$PWD/$ENV_FILE" >> $GITHUB_ENV
 
-          # Optional testdata
+          # Optional test-data
           if [ -n "$TESTDATA_INPUT" ]; then
-            DATA_FILE=$(find postman/$PORTAL/testdata -type f -iname "*$TESTDATA_INPUT*.csv" | head -n 1)
+            DATA_DIR="$PORTAL/test-data"
+
+            if [ ! -d "$DATA_DIR" ]; then
+              echo "❌ test-data folder not found!"
+              exit 1
+            fi
+
+            DATA_FILE=$(find "$DATA_DIR" -type f -iname "*$TESTDATA_INPUT*.csv" | head -n 1)
 
             if [ -z "$DATA_FILE" ]; then
               echo "❌ TestData file not found!"
-              echo "Available testdata files:"
-              find postman/$PORTAL/testdata -type f
+              echo "Available test-data files:"
+              find "$DATA_DIR" -type f
               exit 1
             fi
 
