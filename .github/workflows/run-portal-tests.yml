@@ -42,45 +42,31 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      # 🔍 Normalize Portal & Folder (ROOT LEVEL)
       - id: normalize
         run: |
           INPUT_PORTAL="${{ github.event.inputs.portal }}"
           INPUT_FOLDER="${{ github.event.inputs.folder }}"
 
-          echo "Searching for Portal in repo root: $INPUT_PORTAL"
           PORTAL_PATH=$(find . -maxdepth 1 -type d -iname "$INPUT_PORTAL" | head -n 1)
 
           if [ -z "$PORTAL_PATH" ]; then
-            echo "❌ Portal not found at root level!"
-            echo "Available portals:"
-            find . -maxdepth 1 -type d
+            echo "❌ Portal not found!"
             exit 1
           fi
 
-          echo "Portal found at: $PORTAL_PATH"
-
-          echo "Searching recursively for Folder: $INPUT_FOLDER"
           FOLDER_PATH=$(find "$PORTAL_PATH" -type d -iname "$INPUT_FOLDER" | head -n 1)
 
           if [ -z "$FOLDER_PATH" ]; then
             echo "❌ Folder not found inside portal!"
-            echo "Available folders under $PORTAL_PATH:"
-            find "$PORTAL_PATH" -type d
             exit 1
           fi
-
-          echo "Folder found at: $FOLDER_PATH"
 
           echo "portal_actual=$(basename "$PORTAL_PATH")" >> $GITHUB_OUTPUT
           echo "folder_path=$FOLDER_PATH" >> $GITHUB_OUTPUT
 
-      # 📦 Create matrix of collections (RECURSIVE)
       - id: set-matrix
         run: |
           BASE="${{ steps.normalize.outputs.folder_path }}"
-
-          echo "Scanning recursively inside: $BASE"
 
           FILES=$(find "$BASE" -type f -name "*.postman_collection.json" \
             | jq -R -s -c 'split("\n")[:-1]')
@@ -91,12 +77,9 @@ jobs:
           fi
 
           if [ "$FILES" = "[]" ]; then
-            echo "❌ No collections found in folder or subfolders!"
+            echo "❌ No collections found!"
             exit 1
           fi
-
-          echo "Collections detected:"
-          echo "$FILES"
 
           echo "matrix={\"collection\":$FILES}" >> $GITHUB_OUTPUT
 
@@ -110,60 +93,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 18
 
-      - name: Install Newman + Reporter
+      - name: Install Newman
         run: |
           npm install -g newman
           npm install -g newman-reporter-htmlextra
 
-      # 🌍 Resolve Environment & Optional Test Data
       - name: Resolve Environment & Test Data
         run: |
           PORTAL="${{ needs.discover.outputs.portal_actual }}"
-          ENVIRONMENT_INPUT="${{ github.event.inputs.environment }}"
+          ENV_INPUT="${{ github.event.inputs.environment }}"
           TESTDATA_INPUT="${{ github.event.inputs.testdata }}"
-
-          echo "Portal: $PORTAL"
-          echo "Environment Input: $ENVIRONMENT_INPUT"
 
           ENV_DIR="$PORTAL/environment"
 
-          if [ ! -d "$ENV_DIR" ]; then
-            echo "❌ Environment directory not found: $ENV_DIR"
-            exit 1
-          fi
-
-          ENV_FILE=$(find "$ENV_DIR" -type f -iname "*$ENVIRONMENT_INPUT*.postman_environment.json" | head -n 1)
+          ENV_FILE=$(find "$ENV_DIR" -type f -iname "*$ENV_INPUT*.postman_environment.json" | head -n 1)
 
           if [ -z "$ENV_FILE" ]; then
-            echo "❌ Environment file not found for input: $ENVIRONMENT_INPUT"
-            echo "Available environment files:"
-            find "$ENV_DIR" -type f
+            echo "❌ Environment file not found!"
             exit 1
           fi
 
-          echo "Using environment file: $ENV_FILE"
           echo "ENV_FILE=$PWD/$ENV_FILE" >> $GITHUB_ENV
 
-          # Optional test-data
           if [ -n "$TESTDATA_INPUT" ]; then
             DATA_DIR="$PORTAL/test-data"
-
-            if [ ! -d "$DATA_DIR" ]; then
-              echo "❌ test-data folder not found!"
-              exit 1
-            fi
-
             DATA_FILE=$(find "$DATA_DIR" -type f -iname "*$TESTDATA_INPUT*.csv" | head -n 1)
 
             if [ -z "$DATA_FILE" ]; then
               echo "❌ TestData file not found!"
-              echo "Available test-data files:"
-              find "$DATA_DIR" -type f
               exit 1
             fi
 
@@ -172,15 +133,10 @@ jobs:
             echo "DATA_FILE=" >> $GITHUB_ENV
           fi
 
-      # 🚀 Run Collection (Continue even if tests fail)
       - name: Run Collection
         run: |
           COLLECTION="${{ matrix.collection }}"
           NAME=$(basename "$COLLECTION" .json)
-
-          echo "🚀 Running $NAME"
-          echo "Using ENV_FILE=$ENV_FILE"
-          echo "Using DATA_FILE=$DATA_FILE"
 
           set +e
 
@@ -197,12 +153,41 @@ jobs:
               --reporter-htmlextra-export "$NAME-report.html"
           fi
 
-          echo "✅ Finished $NAME"
-
-      # 📤 Upload Reports
       - name: Upload Reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: reports-${{ needs.discover.outputs.portal_actual }}-${{ github.event.inputs.environment }}
           path: "*-report.html"
+
+  notify:
+    needs: [discover, run-tests]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Send Slack Notification
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        run: |
+          STATUS="${{ needs.run-tests.result }}"
+          TOTAL=$(echo '${{ needs.discover.outputs.matrix }}' | jq '.collection | length')
+
+          if [ "$STATUS" = "success" ]; then
+            FINAL="✅ PASSED"
+          else
+            FINAL="❌ FAILED"
+          fi
+
+          MESSAGE="🚀 Automation Execution Completed
+
+          Portal: ${{ github.event.inputs.portal }}
+          Folder: ${{ github.event.inputs.folder }}
+          Environment: ${{ github.event.inputs.environment }}
+
+          Collections Executed: $TOTAL
+          Overall Status: $FINAL"
+
+          curl -X POST -H 'Content-type: application/json' \
+          --data "{\"text\":\"$MESSAGE\"}" \
+          $SLACK_WEBHOOK
