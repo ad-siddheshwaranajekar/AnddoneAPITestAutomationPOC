@@ -128,7 +128,7 @@ jobs:
           echo "Portal: $PORTAL"
           echo "Environment Input: $ENVIRONMENT_INPUT"
 
-          ENV_DIR="postman/$PORTAL/env"
+          ENV_DIR="postman/$PORTAL/environment"
 
           if [ ! -d "$ENV_DIR" ]; then
             echo "❌ Environment directory not found: $ENV_DIR"
