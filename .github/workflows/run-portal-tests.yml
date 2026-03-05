@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       portal:
-        description: "Select Portal"
+        description: Select Portal
         required: true
         type: choice
         options:
@@ -14,17 +14,17 @@ on:
           - Ally
 
       folder:
-        description: "Enter Folder Name inside Portal"
+        description: Enter Folder Name inside Portal
         required: true
         type: string
 
       environment:
-        description: "Enter Environment Name (e.g., QAT, UAT, DEV)"
+        description: Enter Environment Name (QAT/UAT/DEV)
         required: true
         type: string
 
       testdata:
-        description: "Optional: Enter TestData file name (without .csv)"
+        description: Optional TestData file (without .csv)
         required: false
         type: string
 
@@ -32,7 +32,7 @@ jobs:
   discover:
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
       portal_actual: ${{ steps.normalize.outputs.portal_actual }}
       folder_path: ${{ steps.normalize.outputs.folder_path }}
 
@@ -40,46 +40,34 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+        run: sudo apt-get update -y && sudo apt-get install -y jq
 
       - id: normalize
         run: |
-          INPUT_PORTAL="${{ github.event.inputs.portal }}"
-          INPUT_FOLDER="${{ github.event.inputs.folder }}"
+          set -e
 
-          PORTAL_PATH=$(find . -maxdepth 1 -type d -iname "$INPUT_PORTAL" | head -n 1)
+          PORTAL_INPUT="${{ github.event.inputs.portal }}"
+          FOLDER_INPUT="${{ github.event.inputs.folder }}"
 
-          if [ -z "$PORTAL_PATH" ]; then
-            echo "❌ Portal not found!"
-            exit 1
-          fi
+          PORTAL_PATH=$(find . -maxdepth 1 -type d -iname "$PORTAL_INPUT" | head -n 1)
+          [ -z "$PORTAL_PATH" ] && echo "Portal not found" && exit 1
 
-          FOLDER_PATH=$(find "$PORTAL_PATH" -type d -iname "$INPUT_FOLDER" | head -n 1)
-
-          if [ -z "$FOLDER_PATH" ]; then
-            echo "❌ Folder not found inside portal!"
-            exit 1
-          fi
+          FOLDER_PATH=$(find "$PORTAL_PATH" -type d -iname "$FOLDER_INPUT" | head -n 1)
+          [ -z "$FOLDER_PATH" ] && echo "Folder not found" && exit 1
 
           echo "portal_actual=$(basename "$PORTAL_PATH")" >> $GITHUB_OUTPUT
           echo "folder_path=$FOLDER_PATH" >> $GITHUB_OUTPUT
 
-      - id: set-matrix
+      - id: matrix
         run: |
+          set -e
           BASE="${{ steps.normalize.outputs.folder_path }}"
 
-          FILES=$(find "$BASE" -type f -name "*.postman_collection.json" \
+          FILES=$(find "$BASE" -type f -name "*.postman_collection.json" -print0 \
+            | xargs -0 -I{} echo "{}" \
             | jq -R -s -c 'split("\n")[:-1]')
 
-          if [ "$FILES" = "[]" ]; then
-            FILES=$(find "$BASE" -type f -name "*.json" \
-              | jq -R -s -c 'split("\n")[:-1]')
-          fi
-
-          if [ "$FILES" = "[]" ]; then
-            echo "❌ No collections found!"
-            exit 1
-          fi
+          [ "$FILES" = "[]" ] && echo "No collections found" && exit 1
 
           echo "matrix={\"collection\":$FILES}" >> $GITHUB_OUTPUT
 
@@ -92,45 +80,29 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 18
 
       - name: Install Newman
-        run: |
-          npm install -g newman
-          npm install -g newman-reporter-htmlextra
+        run: npm install -g newman
 
       - name: Resolve Environment & Test Data
         run: |
+          set -e
+
           PORTAL="${{ needs.discover.outputs.portal_actual }}"
           ENV_INPUT="${{ github.event.inputs.environment }}"
           TESTDATA_INPUT="${{ github.event.inputs.testdata }}"
 
-          ENV_DIR="$PORTAL/environment"
-
-          ENV_FILE=$(find "$ENV_DIR" -type f -iname "*$ENV_INPUT*.postman_environment.json" | head -n 1)
-
-          if [ -z "$ENV_FILE" ]; then
-            echo "❌ Environment file not found!"
-            exit 1
-          fi
-
+          ENV_FILE=$(find "$PORTAL/environment" -type f -iname "*$ENV_INPUT*.postman_environment.json" | head -n 1)
+          [ -z "$ENV_FILE" ] && echo "Environment file not found" && exit 1
           echo "ENV_FILE=$PWD/$ENV_FILE" >> $GITHUB_ENV
 
           if [ -n "$TESTDATA_INPUT" ]; then
-            DATA_DIR="$PORTAL/test-data"
-            DATA_FILE=$(find "$DATA_DIR" -type f -iname "*$TESTDATA_INPUT*.csv" | head -n 1)
-
-            if [ -z "$DATA_FILE" ]; then
-              echo "❌ TestData file not found!"
-              exit 1
-            fi
-
+            DATA_FILE=$(find "$PORTAL/test-data" -type f -iname "*$TESTDATA_INPUT*.csv" | head -n 1)
+            [ -z "$DATA_FILE" ] && echo "TestData file not found" && exit 1
             echo "DATA_FILE=$PWD/$DATA_FILE" >> $GITHUB_ENV
-          else
-            echo "DATA_FILE=" >> $GITHUB_ENV
           fi
 
       - name: Run Collection
@@ -138,27 +110,25 @@ jobs:
           COLLECTION="${{ matrix.collection }}"
           NAME=$(basename "$COLLECTION" .json)
 
-          set +e
-
           if [ -n "$DATA_FILE" ]; then
             newman run "$COLLECTION" \
               --environment "$ENV_FILE" \
               --iteration-data "$DATA_FILE" \
-              --reporters cli,htmlextra \
-              --reporter-htmlextra-export "$NAME-report.html"
+              --reporters cli,json \
+              --reporter-json-export "$NAME-report.json" || true
           else
             newman run "$COLLECTION" \
               --environment "$ENV_FILE" \
-              --reporters cli,htmlextra \
-              --reporter-htmlextra-export "$NAME-report.html"
+              --reporters cli,json \
+              --reporter-json-export "$NAME-report.json" || true
           fi
 
-      - name: Upload Reports
+      - name: Upload JSON Reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: reports-${{ needs.discover.outputs.portal_actual }}-${{ github.event.inputs.environment }}
-          path: "*-report.html"
+          name: json-reports
+          path: "*-report.json"
 
   notify:
     needs: [discover, run-tests]
@@ -166,28 +136,42 @@ jobs:
     if: always()
 
     steps:
-      - name: Send Slack Notification
+      - uses: actions/download-artifact@v4
+        with:
+          name: json-reports
+          path: reports
+
+      - name: Install jq
+        run: sudo apt-get update -y && sudo apt-get install -y jq
+
+      - name: Calculate & Notify Slack
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
         run: |
-          STATUS="${{ needs.run-tests.result }}"
-          TOTAL=$(echo '${{ needs.discover.outputs.matrix }}' | jq '.collection | length')
+          TOTAL=0
+          FAILED=0
 
-          if [ "$STATUS" = "success" ]; then
-            FINAL="✅ PASSED"
+          for file in reports/*.json; do
+            T=$(jq '.run.stats.tests.total' "$file")
+            F=$(jq '.run.stats.tests.failed' "$file")
+            TOTAL=$((TOTAL + T))
+            FAILED=$((FAILED + F))
+          done
+
+          PASSED=$((TOTAL - FAILED))
+
+          if [ "$FAILED" -eq 0 ]; then
+            STATUS="PASSED"
+            ICON="✅"
           else
-            FINAL="❌ FAILED"
+            STATUS="FAILED"
+            ICON="❌"
           fi
 
-          MESSAGE="🚀 Automation Execution Completed
+          COLLECTIONS=$(echo '${{ needs.discover.outputs.matrix }}' | jq '.collection | length')
 
-          Portal: ${{ github.event.inputs.portal }}
-          Folder: ${{ github.event.inputs.folder }}
-          Environment: ${{ github.event.inputs.environment }}
+          MESSAGE="API Automation Execution Completed\n\nPortal: ${{ github.event.inputs.portal }}\nModule: ${{ github.event.inputs.folder }}\nEnvironment: ${{ github.event.inputs.environment }}\n\nExecution Summary\n• Collections: $COLLECTIONS\n• Total Tests: $TOTAL\n• Passed: $PASSED\n• Failed: $FAILED\n\nOverall Status: $ICON $STATUS"
 
-          Collections Executed: $TOTAL
-          Overall Status: $FINAL"
-
-          curl -X POST -H 'Content-type: application/json' \
-          --data "{\"text\":\"$MESSAGE\"}" \
-          $SLACK_WEBHOOK
+          jq -n --arg text "$MESSAGE" '{text: $text}' \
+          | curl -s -X POST -H "Content-type: application/json" \
+            --data @- "$SLACK_WEBHOOK"
