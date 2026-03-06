@@ -212,6 +212,7 @@ jobs:
           *Portal:* ${{ github.event.inputs.portal }}
           *Module:* ${{ github.event.inputs.folder }}
           *Environment:* ${{ github.event.inputs.environment }}
+          *Executed By:* ${{ github.actor }}
 
           *📊 Execution Summary*
           • Collections: $COLLECTIONS
