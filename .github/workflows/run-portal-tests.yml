@@ -212,6 +212,7 @@ jobs:
           COLLECTIONS=$(echo '${{ needs.discover.outputs.matrix }}' | jq '.collection | length')
 
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          ARTIFACT_URL="$RUN_URL#artifacts"
 
           MESSAGE="*🚀 API Automation Execution Completed*
 
