@@ -139,27 +139,31 @@ jobs:
           COLLECTION="${{ matrix.collection }}"
           NAME=$(basename "$COLLECTION" .json)
 
+          mkdir -p reports
+
           set +e
 
           if [ -n "$DATA_FILE" ]; then
             newman run "$COLLECTION" \
               --environment "$ENV_FILE" \
               --iteration-data "$DATA_FILE" \
-              --reporters cli,json \
-              --reporter-json-export "$NAME-report.json"
+              --reporters cli,json,htmlextra \
+              --reporter-json-export "reports/$NAME-report.json" \
+              --reporter-htmlextra-export "reports/$NAME-report.html"
           else
             newman run "$COLLECTION" \
               --environment "$ENV_FILE" \
-              --reporters cli,json \
-              --reporter-json-export "$NAME-report.json"
+              --reporters cli,json,htmlextra \
+              --reporter-json-export "reports/$NAME-report.json" \
+              --reporter-htmlextra-export "reports/$NAME-report.html"
           fi
 
-      - name: Upload JSON Reports
+      - name: Upload Reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: json-reports
-          path: "*-report.json"
+          name: api-test-reports
+          path: reports/
 
   notify:
     needs: [discover, run-tests]
@@ -169,7 +173,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: json-reports
+          name: api-test-reports
           path: reports
 
       - name: Install jq
@@ -179,6 +183,7 @@ jobs:
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
         run: |
+
           TOTAL=0
           FAILED=0
 
@@ -200,6 +205,8 @@ jobs:
 
           COLLECTIONS=$(echo '${{ needs.discover.outputs.matrix }}' | jq '.collection | length')
 
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
           MESSAGE="*🚀 API Automation Execution Completed*
 
           *Portal:* ${{ github.event.inputs.portal }}
@@ -212,7 +219,10 @@ jobs:
           • Passed: $PASSED
           • Failed: $FAILED
 
-          *Overall Status:* $FINAL"
+          *Overall Status:* $FINAL
+
+          *HTML Report Download:* 
+          $RUN_URL"
 
           curl -X POST -H 'Content-type: application/json' \
           --data "{\"text\":\"$MESSAGE\"}" \
