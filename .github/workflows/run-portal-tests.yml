@@ -19,33 +19,39 @@ on:
         type: string
 
       environment:
-        description: "Enter Environment Name (e.g., QAT, UAT, DEV)"
+        description: "Enter Environment Name (QAT / UAT / DEV)"
         required: true
         type: string
 
       testdata:
-        description: "Optional: Enter TestData file name (without .csv)"
+        description: "Optional: TestData file name (without .csv)"
         required: false
         type: string
 
 jobs:
+  # -------------------------------------------------------
+  # DISCOVER COLLECTIONS
+  # -------------------------------------------------------
+
   discover:
     runs-on: ubuntu-latest
 
     outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
       portal_actual: ${{ steps.normalize.outputs.portal_actual }}
       folder_path: ${{ steps.normalize.outputs.folder_path }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repo
+        uses: actions/checkout@v4
 
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
       - id: normalize
-        name: Detect Portal and Folder
+        name: Detect Portal & Folder
         run: |
+
           INPUT_PORTAL="${{ github.event.inputs.portal }}"
           INPUT_FOLDER="${{ github.event.inputs.folder }}"
 
@@ -66,15 +72,18 @@ jobs:
           echo "portal_actual=$(basename "$PORTAL_PATH")" >> $GITHUB_OUTPUT
           echo "folder_path=$FOLDER_PATH" >> $GITHUB_OUTPUT
 
-      - id: set-matrix
+      - id: matrix
         name: Discover Collections
         run: |
+
           BASE="${{ steps.normalize.outputs.folder_path }}"
 
-          FILES=$(find "$BASE" -type f -name "*.postman_collection.json" | jq -R -s -c 'split("\n")[:-1]')
+          FILES=$(find "$BASE" -type f -name "*.postman_collection.json" \
+          | jq -R -s -c 'split("\n")[:-1]')
 
           if [ "$FILES" = "[]" ]; then
-            FILES=$(find "$BASE" -type f -name "*.json" | jq -R -s -c 'split("\n")[:-1]')
+            FILES=$(find "$BASE" -type f -name "*.json" \
+            | jq -R -s -c 'split("\n")[:-1]')
           fi
 
           if [ "$FILES" = "[]" ]; then
@@ -83,6 +92,10 @@ jobs:
           fi
 
           echo "matrix={\"collection\":$FILES}" >> $GITHUB_OUTPUT
+
+  # -------------------------------------------------------
+  # RUN TESTS
+  # -------------------------------------------------------
 
   run-tests:
     needs: discover
@@ -93,17 +106,22 @@ jobs:
       matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repo
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
           node-version: 18
 
       - name: Install Newman
-        run: npm install -g newman newman-reporter-htmlextra
-
-      - name: Resolve Environment & Test Data
         run: |
+          npm install -g newman
+          npm install -g newman-reporter-htmlextra
+
+      - name: Resolve Environment & TestData
+        run: |
+
           PORTAL="${{ needs.discover.outputs.portal_actual }}"
           ENV_INPUT="${{ github.event.inputs.environment }}"
           TESTDATA_INPUT="${{ github.event.inputs.testdata }}"
@@ -120,6 +138,7 @@ jobs:
           echo "ENV_FILE=$PWD/$ENV_FILE" >> $GITHUB_ENV
 
           if [ -n "$TESTDATA_INPUT" ]; then
+
             DATA_DIR="$PORTAL/test-data"
 
             DATA_FILE=$(find "$DATA_DIR" -type f -iname "*$TESTDATA_INPUT*.csv" | head -n 1)
@@ -136,6 +155,7 @@ jobs:
 
       - name: Run Collection
         run: |
+
           COLLECTION="${{ matrix.collection }}"
           NAME=$(basename "$COLLECTION" .json)
 
@@ -144,18 +164,22 @@ jobs:
           set +e
 
           if [ -n "$DATA_FILE" ]; then
+
             newman run "$COLLECTION" \
               --environment "$ENV_FILE" \
               --iteration-data "$DATA_FILE" \
               --reporters cli,json,htmlextra \
-              --reporter-json-export "reports/$NAME-report.json" \
-              --reporter-htmlextra-export "reports/$NAME-report.html"
+              --reporter-json-export "reports/$NAME.json" \
+              --reporter-htmlextra-export "reports/$NAME.html"
+
           else
+
             newman run "$COLLECTION" \
               --environment "$ENV_FILE" \
               --reporters cli,json,htmlextra \
-              --reporter-json-export "reports/$NAME-report.json" \
-              --reporter-htmlextra-export "reports/$NAME-report.html"
+              --reporter-json-export "reports/$NAME.json" \
+              --reporter-htmlextra-export "reports/$NAME.html"
+
           fi
 
       - name: Upload Reports
@@ -165,25 +189,28 @@ jobs:
           name: api-test-reports
           path: reports/
 
+  # -------------------------------------------------------
+  # SLACK NOTIFICATION
+  # -------------------------------------------------------
+
   notify:
     needs: [discover, run-tests]
     runs-on: ubuntu-latest
     if: always()
 
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download Reports
+        uses: actions/download-artifact@v4
         with:
           name: api-test-reports
           path: reports
 
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
-
       - name: Send Slack Notification
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
         run: |
-
           TOTAL=0
           FAILED=0
 
@@ -198,33 +225,18 @@ jobs:
           PASSED=$((TOTAL - FAILED))
 
           if [ "$FAILED" -eq 0 ]; then
-            FINAL=":white_check_mark: PASSED"
+            STATUS=":white_check_mark: PASSED"
           else
-            FINAL=":x: FAILED"
+            STATUS=":x: FAILED"
           fi
 
           COLLECTIONS=$(echo '${{ needs.discover.outputs.matrix }}' | jq '.collection | length')
 
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          REPORT_URL="$RUN_URL#artifacts"
 
-          MESSAGE="*🚀 API Automation Execution Completed*
+          TEXT="🚀 API Automation Execution Completed\n\nPortal: ${{ github.event.inputs.portal }}\nModule: ${{ github.event.inputs.folder }}\nEnvironment: ${{ github.event.inputs.environment }}\nExecuted By: ${{ github.actor }}\n\n📊 Execution Summary\n• Collections: $COLLECTIONS\n• Total Tests: $TOTAL\n• Passed: $PASSED\n• Failed: $FAILED\n\nOverall Status: $STATUS\n\n🔗 GitHub Run:\n$RUN_URL\n\n📄 HTML Report:\n$REPORT_URL"
 
-          *Portal:* ${{ github.event.inputs.portal }}
-          *Module:* ${{ github.event.inputs.folder }}
-          *Environment:* ${{ github.event.inputs.environment }}
-          *Executed By:* ${{ github.actor }}
-
-          *📊 Execution Summary*
-          • Collections: $COLLECTIONS
-          • Total Tests: $TOTAL
-          • Passed: $PASSED
-          • Failed: $FAILED
-
-          *Overall Status:* $FINAL
-
-          *HTML Report Download:* 
-          $RUN_URL"
-
-          curl -X POST -H 'Content-type: application/json' \
-          --data "{\"text\":\"$MESSAGE\"}" \
-          $SLACK_WEBHOOK
+          jq -n --arg text "$TEXT" '{text: $text}' \
+          | curl -X POST -H "Content-type: application/json" \
+            --data @- $SLACK_WEBHOOK
