@@ -106,9 +106,7 @@
             {
               "listen": "prerequest",
               "script": {
-                "exec": [
-                  ""
-                ],
+                "exec": [""],
                 "type": "text/javascript",
                 "packages": {},
                 "requests": {}
@@ -126,7 +124,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": " //Dev\r\n// {\r\n//       \"userName\": \"AdminUser\",\r\n//       \"password\": \"AdminDev#242024\"\r\n//  }\r\n\r\n\r\n\r\n//QAT\r\n{\r\n\"userName\": \"SiddheshwarQAT\",\r\n\"password\": \"666#Qwertyuiop\"\r\n}\r\n\r\n// // //UAT\r\n\r\n// {\r\n// \"userName\": \"SiddheshwarUAT\",\r\n// \"password\": \"123#Qwertyuiop\"\r\n// }",
+              "raw": " //Dev\r\n// {\r\n//       \"userName\": \"AdminUser\",\r\n//       \"password\": \"AdminDev#242024\"\r\n//  }\r\n\r\n\r\n\r\n//QAT\r\n{\r\n\"userName\": \"SiddheshwarQAT\",\r\n\"password\": \"667#Qwertyuiop\"\r\n}\r\n\r\n// // //UAT\r\n\r\n// {\r\n// \"userName\": \"SiddheshwarUAT\",\r\n// \"password\": \"123#Qwertyuiop\"\r\n// }",
               "options": {
                 "raw": {
                   "language": "json"
@@ -135,13 +133,8 @@
             },
             "url": {
               "raw": "{{BaseURL}}/users/sessions",
-              "host": [
-                "{{BaseURL}}"
-              ],
-              "path": [
-                "users",
-                "sessions"
-              ]
+              "host": ["{{BaseURL}}"],
+              "path": ["users", "sessions"]
             }
           },
           "response": []
