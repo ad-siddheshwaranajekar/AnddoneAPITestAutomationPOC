@@ -31,6 +31,7 @@ on:
 jobs:
   discover:
     runs-on: ubuntu-latest
+
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       portal_actual: ${{ steps.normalize.outputs.portal_actual }}
@@ -43,19 +44,20 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y jq
 
       - id: normalize
+        name: Detect Portal and Folder
         run: |
           INPUT_PORTAL="${{ github.event.inputs.portal }}"
           INPUT_FOLDER="${{ github.event.inputs.folder }}"
 
-          # Search for portal folder at repo root
           PORTAL_PATH=$(find . -maxdepth 1 -type d -iname "$INPUT_PORTAL" | head -n 1)
+
           if [ -z "$PORTAL_PATH" ]; then
             echo "❌ Portal not found!"
             exit 1
           fi
 
-          # Search for folder inside portal
           FOLDER_PATH=$(find "$PORTAL_PATH" -type d -iname "$INPUT_FOLDER" | head -n 1)
+
           if [ -z "$FOLDER_PATH" ]; then
             echo "❌ Folder not found inside portal!"
             exit 1
@@ -65,13 +67,16 @@ jobs:
           echo "folder_path=$FOLDER_PATH" >> $GITHUB_OUTPUT
 
       - id: set-matrix
+        name: Discover Collections
         run: |
           BASE="${{ steps.normalize.outputs.folder_path }}"
 
           FILES=$(find "$BASE" -type f -name "*.postman_collection.json" | jq -R -s -c 'split("\n")[:-1]')
+
           if [ "$FILES" = "[]" ]; then
             FILES=$(find "$BASE" -type f -name "*.json" | jq -R -s -c 'split("\n")[:-1]')
           fi
+
           if [ "$FILES" = "[]" ]; then
             echo "❌ No collections found!"
             exit 1
@@ -82,12 +87,14 @@ jobs:
   run-tests:
     needs: discover
     runs-on: ubuntu-latest
+
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 18
@@ -102,20 +109,26 @@ jobs:
           TESTDATA_INPUT="${{ github.event.inputs.testdata }}"
 
           ENV_DIR="$PORTAL/environment"
+
           ENV_FILE=$(find "$ENV_DIR" -type f -iname "*$ENV_INPUT*.postman_environment.json" | head -n 1)
+
           if [ -z "$ENV_FILE" ]; then
             echo "❌ Environment file not found!"
             exit 1
           fi
+
           echo "ENV_FILE=$PWD/$ENV_FILE" >> $GITHUB_ENV
 
           if [ -n "$TESTDATA_INPUT" ]; then
             DATA_DIR="$PORTAL/test-data"
+
             DATA_FILE=$(find "$DATA_DIR" -type f -iname "*$TESTDATA_INPUT*.csv" | head -n 1)
+
             if [ -z "$DATA_FILE" ]; then
               echo "❌ TestData file not found!"
               exit 1
             fi
+
             echo "DATA_FILE=$PWD/$DATA_FILE" >> $GITHUB_ENV
           else
             echo "DATA_FILE=" >> $GITHUB_ENV
@@ -125,6 +138,7 @@ jobs:
         run: |
           COLLECTION="${{ matrix.collection }}"
           NAME=$(basename "$COLLECTION" .json)
+
           set +e
 
           if [ -n "$DATA_FILE" ]; then
@@ -161,7 +175,7 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Calculate Test Summary & Notify Slack
+      - name: Send Slack Notification
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
         run: |
@@ -171,20 +185,35 @@ jobs:
           for file in reports/*.json; do
             T=$(jq '.run.stats.tests.total' "$file")
             F=$(jq '.run.stats.tests.failed' "$file")
+
             TOTAL=$((TOTAL + T))
             FAILED=$((FAILED + F))
           done
 
           PASSED=$((TOTAL - FAILED))
-          FINAL="✅ PASSED"
-          if [ "$FAILED" -gt 0 ]; then
-            FINAL="❌ FAILED"
+
+          if [ "$FAILED" -eq 0 ]; then
+            FINAL=":white_check_mark: PASSED"
+          else
+            FINAL=":x: FAILED"
           fi
 
           COLLECTIONS=$(echo '${{ needs.discover.outputs.matrix }}' | jq '.collection | length')
 
-          MESSAGE="🚀 API Automation Execution Completed\n\nPortal: ${{ github.event.inputs.portal }}\nModule: ${{ github.event.inputs.folder }}\nEnvironment: ${{ github.event.inputs.environment }}\n\nExecution Summary\n• Collections Executed: $COLLECTIONS\n• Total Tests: $TOTAL\n• Passed: $PASSED ✅\n• Failed: $FAILED ❌\n\nOverall Status: $FINAL"
+          MESSAGE="*🚀 API Automation Execution Completed*
 
-          curl -X POST -H "Content-type: application/json" \
-            --data "{\"text\":\"$MESSAGE\"}" \
-            $SLACK_WEBHOOK
+          *Portal:* ${{ github.event.inputs.portal }}
+          *Module:* ${{ github.event.inputs.folder }}
+          *Environment:* ${{ github.event.inputs.environment }}
+
+          *📊 Execution Summary*
+          • Collections: $COLLECTIONS
+          • Total Tests: $TOTAL
+          • Passed: $PASSED
+          • Failed: $FAILED
+
+          *Overall Status:* $FINAL"
+
+          curl -X POST -H 'Content-type: application/json' \
+          --data "{\"text\":\"$MESSAGE\"}" \
+          $SLACK_WEBHOOK
