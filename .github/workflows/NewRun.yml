@@ -1,4 +1,4 @@
-name: Run Portal → Folder → Environment1
+name: Run Portal → Folder → Environment
 
 on:
   workflow_dispatch:
@@ -86,13 +86,11 @@ jobs:
           COLLECTION_INPUT="${{ github.event.inputs.collection }}"
 
           if [ -n "$COLLECTION_INPUT" ]; then
-            echo "Searching for specific collection..."
 
             FILE=$(find "$BASE" -type f -iname "*$COLLECTION_INPUT*.postman_collection.json" | head -n 1)
 
             if [ -z "$FILE" ]; then
               echo "❌ Collection not found!"
-              echo "Available collections:"
               find "$BASE" -type f -name "*.postman_collection.json"
               exit 1
             fi
@@ -100,13 +98,13 @@ jobs:
             FILES=$(echo "$FILE" | jq -R -s -c 'split("\n")[:-1]')
 
           else
-            echo "Running ALL collections inside folder"
 
             FILES=$(find "$BASE" -type f -name "*.postman_collection.json" | jq -R -s -c 'split("\n")[:-1]')
 
             if [ "$FILES" = "[]" ]; then
               FILES=$(find "$BASE" -type f -name "*.json" | jq -R -s -c 'split("\n")[:-1]')
             fi
+
           fi
 
           if [ "$FILES" = "[]" ]; then
@@ -179,8 +177,6 @@ jobs:
 
           mkdir -p reports
 
-          set +e
-
           if [ -n "$DATA_FILE" ]; then
 
             newman run "$COLLECTION" \
@@ -204,66 +200,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: api-test-reports
+          name: api-test-reports-${{ strategy.job-index }}
           path: reports/
-
-  notify:
-    needs: [discover, run-tests]
-    runs-on: ubuntu-latest
-    if: always()
-
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: api-test-reports
-          path: reports
-
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      - name: Send Slack Notification
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-        run: |
-
-          TOTAL=0
-          FAILED=0
-
-          for file in reports/*.json; do
-            T=$(jq '.run.stats.tests.total' "$file")
-            F=$(jq '.run.stats.tests.failed' "$file")
-
-            TOTAL=$((TOTAL + T))
-            FAILED=$((FAILED + F))
-          done
-
-          PASSED=$((TOTAL - FAILED))
-
-          if [ "$FAILED" -eq 0 ]; then
-            FINAL=":white_check_mark: PASSED"
-          else
-            FINAL=":x: FAILED"
-          fi
-
-          COLLECTIONS=$(echo '${{ needs.discover.outputs.matrix }}' | jq '.collection | length')
-
-          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          ARTIFACT_URL="$RUN_URL#artifacts"
-
-          MESSAGE="*🚀 API Automation Execution Completed*
-
-          *Portal:* ${{ github.event.inputs.portal }}
-          *Module:* ${{ github.event.inputs.folder }}
-          *Environment:* ${{ github.event.inputs.environment }}
-          *Executed By:* ${{ github.actor }}
-
-          *📊 Execution Summary*
-          • Collections: $COLLECTIONS
-          • Total Tests: $TOTAL
-
-          *HTML Report Download:* 
-          $RUN_URL"
-
-          curl -X POST -H 'Content-type: application/json' \
-          --data "{\"text\":\"$MESSAGE\"}" \
-          $SLACK_WEBHOOK
