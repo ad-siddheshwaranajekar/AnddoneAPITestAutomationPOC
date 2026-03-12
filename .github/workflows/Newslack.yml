@@ -57,8 +57,7 @@ jobs:
       folder_path: ${{ steps.normalize.outputs.folder_path }}
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
 
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
@@ -72,14 +71,14 @@ jobs:
           PORTAL_PATH=$(find . -maxdepth 1 -type d -iname "$INPUT_PORTAL" | head -n 1)
 
           if [ -z "$PORTAL_PATH" ]; then
-            echo "❌ Portal not found"
+            echo "Portal not found"
             exit 1
           fi
 
           FOLDER_PATH=$(find "$PORTAL_PATH" -type d -iname "$INPUT_FOLDER" | head -n 1)
 
           if [ -z "$FOLDER_PATH" ]; then
-            echo "❌ Folder not found inside portal"
+            echo "Folder not found inside portal"
             exit 1
           fi
 
@@ -98,7 +97,7 @@ jobs:
             FILE=$(find "$BASE" -type f -iname "*$COLLECTION_INPUT*.postman_collection.json" | head -n 1)
 
             if [ -z "$FILE" ]; then
-              echo "❌ Collection not found"
+              echo "Collection not found"
               exit 1
             fi
 
@@ -108,21 +107,12 @@ jobs:
 
             FILES=$(find "$BASE" -type f -name "*.postman_collection.json" | jq -R -s -c 'split("\n")[:-1]')
 
-            if [ "$FILES" = "[]" ]; then
-              FILES=$(find "$BASE" -type f -name "*.json" | jq -R -s -c 'split("\n")[:-1]')
-            fi
-
-          fi
-
-          if [ "$FILES" = "[]" ]; then
-            echo "❌ No collections found"
-            exit 1
           fi
 
           echo "matrix={\"collection\":$FILES}" >> $GITHUB_OUTPUT
 
   # -------------------------------------------------
-  # Run Collections
+  # Run Tests (Parallel)
   # -------------------------------------------------
 
   run-tests:
@@ -134,53 +124,31 @@ jobs:
       matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
 
-      - name: Setup Node
-        uses: actions/setup-node@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
 
       - name: Install Newman
         run: npm install -g newman newman-reporter-htmlextra
 
-      - name: Resolve Environment & Test Data
+      - name: Resolve Environment
         run: |
 
           PORTAL="${{ needs.discover.outputs.portal_actual }}"
           ENV_INPUT="${{ github.event.inputs.environment }}"
-          TESTDATA_INPUT="${{ github.event.inputs.testdata }}"
 
           ENV_DIR="$PORTAL/environment"
 
           ENV_FILE=$(find "$ENV_DIR" -type f -iname "*$ENV_INPUT*.postman_environment.json" | head -n 1)
 
           if [ -z "$ENV_FILE" ]; then
-            echo "❌ Environment file not found"
+            echo "Environment file not found"
             exit 1
           fi
 
           echo "ENV_FILE=$PWD/$ENV_FILE" >> $GITHUB_ENV
-
-          if [ -n "$TESTDATA_INPUT" ]; then
-
-            DATA_DIR="$PORTAL/test-data"
-
-            DATA_FILE=$(find "$DATA_DIR" -type f -iname "*$TESTDATA_INPUT*.csv" | head -n 1)
-
-            if [ -z "$DATA_FILE" ]; then
-              echo "❌ TestData file not found"
-              exit 1
-            fi
-
-            echo "DATA_FILE=$PWD/$DATA_FILE" >> $GITHUB_ENV
-
-          else
-
-            echo "DATA_FILE=" >> $GITHUB_ENV
-
-          fi
 
       - id: collection
         name: Extract Collection Name
@@ -197,31 +165,36 @@ jobs:
 
           mkdir -p reports
 
-          if [ -n "$DATA_FILE" ]; then
-
-            newman run "$COLLECTION" \
-              --environment "$ENV_FILE" \
-              --iteration-data "$DATA_FILE" \
-              --reporters cli,json,htmlextra \
-              --reporter-json-export "reports/$NAME-report.json" \
-              --reporter-htmlextra-export "reports/$NAME-report.html"
-
-          else
-
-            newman run "$COLLECTION" \
-              --environment "$ENV_FILE" \
-              --reporters cli,json,htmlextra \
-              --reporter-json-export "reports/$NAME-report.json" \
-              --reporter-htmlextra-export "reports/$NAME-report.html"
-
-          fi
+          newman run "$COLLECTION" \
+            --environment "$ENV_FILE" \
+            --reporters cli,json,htmlextra \
+            --reporter-json-export "reports/$NAME-report.json" \
+            --reporter-htmlextra-export "reports/$NAME-report.html"
 
       - name: Upload Reports
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: api-test-report-${{ steps.collection.outputs.name }}
+          name: report-${{ steps.collection.outputs.name }}
           path: reports/
+
+  # -------------------------------------------------
+  # Slack Notification (Single)
+  # -------------------------------------------------
+
+  notify-slack:
+    needs: run-tests
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Download Reports
+        uses: actions/download-artifact@v5
+        with:
+          path: reports
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Send Slack Notification
         env:
@@ -259,8 +232,7 @@ jobs:
           *📦 Collections Executed:* $COLLECTIONS
           $NAMES
 
-          *📊 Execution Summary*
-          • Total Tests: $TOTAL
+          *📊 Total Tests:* $TOTAL
 
           *HTML Report Download:* 
           $RUN_URL"
