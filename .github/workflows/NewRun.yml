@@ -34,7 +34,7 @@ on:
         type: string
 
       environment:
-        description: "Enter Environment Name (e.g., QAT, UAT, DEV)"
+        description: "Enter Environment Name (QAT / UAT / DEV)"
         required: true
         type: string
 
@@ -44,11 +44,15 @@ on:
         type: string
 
 jobs:
+  # -------------------------------------------------
+  # Discover Collections
+  # -------------------------------------------------
+
   discover:
     runs-on: ubuntu-latest
 
     outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
       portal_actual: ${{ steps.normalize.outputs.portal_actual }}
       folder_path: ${{ steps.normalize.outputs.folder_path }}
 
@@ -68,21 +72,21 @@ jobs:
           PORTAL_PATH=$(find . -maxdepth 1 -type d -iname "$INPUT_PORTAL" | head -n 1)
 
           if [ -z "$PORTAL_PATH" ]; then
-            echo "❌ Portal not found!"
+            echo "❌ Portal not found"
             exit 1
           fi
 
           FOLDER_PATH=$(find "$PORTAL_PATH" -type d -iname "$INPUT_FOLDER" | head -n 1)
 
           if [ -z "$FOLDER_PATH" ]; then
-            echo "❌ Folder not found inside portal!"
+            echo "❌ Folder not found inside portal"
             exit 1
           fi
 
           echo "portal_actual=$(basename "$PORTAL_PATH")" >> $GITHUB_OUTPUT
           echo "folder_path=$FOLDER_PATH" >> $GITHUB_OUTPUT
 
-      - id: set-matrix
+      - id: matrix
         name: Discover Collections
         run: |
 
@@ -94,8 +98,7 @@ jobs:
             FILE=$(find "$BASE" -type f -iname "*$COLLECTION_INPUT*.postman_collection.json" | head -n 1)
 
             if [ -z "$FILE" ]; then
-              echo "❌ Collection not found!"
-              find "$BASE" -type f -name "*.postman_collection.json"
+              echo "❌ Collection not found"
               exit 1
             fi
 
@@ -112,11 +115,15 @@ jobs:
           fi
 
           if [ "$FILES" = "[]" ]; then
-            echo "❌ No collections found!"
+            echo "❌ No collections found"
             exit 1
           fi
 
           echo "matrix={\"collection\":$FILES}" >> $GITHUB_OUTPUT
+
+  # -------------------------------------------------
+  # Run Collections
+  # -------------------------------------------------
 
   run-tests:
     needs: discover
@@ -133,7 +140,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v5
         with:
-          node-version: 18
+          node-version: 20
 
       - name: Install Newman
         run: npm install -g newman newman-reporter-htmlextra
@@ -150,7 +157,7 @@ jobs:
           ENV_FILE=$(find "$ENV_DIR" -type f -iname "*$ENV_INPUT*.postman_environment.json" | head -n 1)
 
           if [ -z "$ENV_FILE" ]; then
-            echo "❌ Environment file not found!"
+            echo "❌ Environment file not found"
             exit 1
           fi
 
@@ -163,7 +170,7 @@ jobs:
             DATA_FILE=$(find "$DATA_DIR" -type f -iname "*$TESTDATA_INPUT*.csv" | head -n 1)
 
             if [ -z "$DATA_FILE" ]; then
-              echo "❌ TestData file not found!"
+              echo "❌ TestData file not found"
               exit 1
             fi
 
@@ -175,11 +182,18 @@ jobs:
 
           fi
 
+      - id: collection
+        name: Extract Collection Name
+        run: |
+          COLLECTION="${{ matrix.collection }}"
+          NAME=$(basename "$COLLECTION" .postman_collection.json)
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+
       - name: Run Collection
         run: |
 
           COLLECTION="${{ matrix.collection }}"
-          NAME=$(basename "$COLLECTION" .json)
+          NAME="${{ steps.collection.outputs.name }}"
 
           mkdir -p reports
 
@@ -206,5 +220,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: api-test-reports-${{ strategy.job-index }}
+          name: api-test-report-${{ steps.collection.outputs.name }}
           path: reports/
