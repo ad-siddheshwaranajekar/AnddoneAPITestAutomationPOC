@@ -1,4 +1,4 @@
-name: Run Portal → Folder → Environment1
+name: Run Portal → Folder → Environment2
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
