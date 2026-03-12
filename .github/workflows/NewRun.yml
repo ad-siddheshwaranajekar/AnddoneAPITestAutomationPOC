@@ -222,3 +222,41 @@ jobs:
         with:
           name: api-test-report-${{ steps.collection.outputs.name }}
           path: reports/
+
+      - name: Send Slack Notification
+        if: always()
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        run: |
+
+          TOTAL=0
+
+          for file in reports/*.json; do
+            if [ -f "$file" ]; then
+              T=$(jq -r '.run.stats.tests.total // 0' "$file")
+              TOTAL=$((TOTAL + T))
+            fi
+          done
+
+          COLLECTION_NAME="${{ steps.collection.outputs.name }}"
+
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          MESSAGE="*🚀 API Automation Execution Completed*
+
+          *Portal:* ${{ github.event.inputs.portal }}
+          *Module:* ${{ github.event.inputs.folder }}
+          *Collection:* $COLLECTIONS
+          *Environment:* ${{ github.event.inputs.environment }}
+          *Executed By:* ${{ github.actor }}
+
+          *📊 Execution Summary*
+          • Collections: $COLLECTIONS
+          • Total Tests: $TOTAL
+
+          *HTML Report Download:* 
+          $RUN_URL"
+
+          curl -X POST -H 'Content-type: application/json' \
+          --data "{\"text\":\"$MESSAGE\"}" \
+          $SLACK_WEBHOOK
